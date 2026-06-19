@@ -2,7 +2,7 @@
 // @name         Void Quantum Blaster Logger
 // @namespace    http://tampermonkey.net/
 // @version      2026.06.19
-// @description  A userscript that keeps track of item gotten with Void Quantum Blaster. Works with two blasters at once.
+// @description  A userscript that keeps track of item gotten with Void Quantum Blaster. Works with one or two blasters at once.
 // @author       rallozarx
 // @match        https://www.neopets.com/dome/*
 // @icon         https://images.neopets.com/themes/h5/basic/images/battledome-icon.png
