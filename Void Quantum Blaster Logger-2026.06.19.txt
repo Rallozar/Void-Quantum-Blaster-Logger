@@ -119,10 +119,8 @@
                 }
             });
 
-            console.log(customItemsArray);
             if (!!customItemsArray.length) {
                 getItems().then((items) => {
-                    console.log(items);
                     customItemsArray.forEach(item => {
                         let existingItem = items.find(entry => entry.item === item);
 
@@ -133,6 +131,9 @@
                         }
                     });
                     GM.setValue(STORAGE, JSON.stringify(items));
+                })
+                .catch((error) => {
+                    console.error("Promise rejected:", error);
                 });
             }
         }
