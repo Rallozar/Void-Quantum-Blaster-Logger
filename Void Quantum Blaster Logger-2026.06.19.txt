@@ -1,0 +1,147 @@
+// ==UserScript==
+// @name         Void Quantum Blaster Logger
+// @namespace    http://tampermonkey.net/
+// @version      2026.06.19
+// @description  A userscript that keeps track of item gotten with Void Quantum Blaster. Works with two at once.
+// @author       rallozarx
+// @match        https://www.neopets.com/dome/*
+// @icon         https://images.neopets.com/themes/h5/basic/images/battledome-icon.png
+// @run-at       document-end
+// @grant        GM.setValue
+// @grant        GM.getValue
+// ==/UserScript==
+
+// Summary:
+// This userscript adds an item gotten with Void Quantum Blaster to a list, or increases the quantity by 1 if you already got it.
+// The list is hidden and can only be viewed by downloading the csv. Two icons, Clear and Download, are added to the bookmark bar in the dome.
+
+(function() {
+    'use strict';
+
+    const STORAGE = "voidquantumblaster";
+
+    const getItems = async () => {
+        const storage = await GM.getValue(STORAGE, "[]");
+        return JSON.parse(storage);
+    }
+
+    const clearAllItems = () => {
+        GM.setValue(STORAGE, "[]");
+    }
+
+    const exportItemLogsToCsv = async () => {
+        const itemData = await getItems();
+        const filename = "neopets-void-quantum-blaster-log.csv";
+        const headers = ["Item", "Quantity"];
+        const csvData = [headers.join(',')];
+        csvData.push("Total = " + itemData.reduce((sum, current) => sum + current.quantity, 0));
+        csvData.push("");
+        itemData.forEach(item => csvData.push([
+            item.item,
+            item.quantity
+        ].join(',')));
+
+        const blob = new Blob([csvData.join("\n")], { type: 'text/csv;charset=utf-8;' });
+        if (navigator.msSaveBlob) { // IE 10+
+            navigator.msSaveBlob(blob, filename);
+        } else {
+            const link = document.createElement("a");
+            if (link.download !== undefined) {
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", filename);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+    };
+
+    const titleContainer = document.querySelector('.navsub-left__2020');
+
+    if (titleContainer) {
+
+        const clearTag = document.createElement('a');
+        clearTag.innerHTML = '<img src="https://images.neopets.com/ncmall/buttons/btn_delete.gif" alt="Clear" style="vertical-align: middle; width: 30px; height: 30px;">';
+        clearTag.title = 'Clear item log';
+        clearTag.style.marginRight = '10px';
+        clearTag.style.cursor = 'pointer';
+        clearTag.style.display = 'inline-flex';
+        clearTag.style.position = 'relative';
+        clearTag.style.top = '5px';
+        clearTag.onclick = function() {
+            if (window.confirm("Are you sure you want to clear the item log?")) {
+                clearAllItems();
+                alert("Item log cleared.");
+            }
+        };
+
+        const downloadTag = document.createElement('a');
+        downloadTag.innerHTML = '<img src="https://images.neopets.com/neohome2/public_html/disk.png" alt="Download" style="vertical-align: middle; width: 30px; height: 30px;">';
+        downloadTag.title = 'Download item log';
+        downloadTag.style.cursor = 'pointer';
+        downloadTag.style.display = 'inline-flex';
+        downloadTag.style.position = 'relative';
+        downloadTag.style.top = '5px';
+        downloadTag.onclick = function() {
+            exportItemLogsToCsv()
+            .then()
+            .catch((error) => {
+                console.error("Promise rejected:", error);
+            });
+        };
+
+        titleContainer.appendChild(clearTag);
+        titleContainer.appendChild(downloadTag);
+    }
+
+    const targetNode = document.getElementById('flround') || document.body;
+
+    let round = 0;
+
+    const observer = new MutationObserver((mutations) => {
+        const roundText = targetNode?.innerText || '';
+        const nextRound = String(round + 1);
+
+        if (roundText.includes(nextRound)) {
+            round++;
+
+            const messageCells = document.querySelectorAll('#log td.msg');
+            const customItemsArray = [];
+            const rewardPattern = /You have also been rewarded with\s+(.+)/i;
+
+            messageCells.forEach(cell => {
+                const text = cell.textContent.trim();
+                const match = text.match(rewardPattern);
+                if (match) {
+                    customItemsArray.push(match[1].trim());
+                }
+            });
+
+            console.log(customItemsArray);
+            if (!!customItemsArray.length) {
+                getItems().then((items) => {
+                    console.log(items);
+                    customItemsArray.forEach(item => {
+                        let existingItem = items.find(entry => entry.item === item);
+
+                        if (existingItem) {
+                            existingItem.quantity += 1;
+                        } else {
+                            items.push({ item: item, quantity: 1 });
+                        }
+                    });
+                    GM.setValue(STORAGE, JSON.stringify(items));
+                });
+            }
+        }
+    });
+
+    observer.observe(targetNode, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true
+    });
+})();
