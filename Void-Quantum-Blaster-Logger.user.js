@@ -1,19 +1,36 @@
 // ==UserScript==
 // @name         Void Quantum Blaster Logger
 // @namespace    http://tampermonkey.net/
-// @version      2026.06.19
-// @description  A userscript that keeps track of item gotten with Void Quantum Blaster. Works with one or two blasters at once.
+// @version      2026.06.26
+// @updateURL    https://raw.githubusercontent.com/Rallozar/Void-Quantum-Blaster-Logger/main/Void-Quantum-Blaster-Logger.user.js
+// @description  A userscript that keeps track of item gotten with Void Quantum Blaster. Works with two blasters at once.
 // @author       rallozarx
 // @match        https://www.neopets.com/dome/*
 // @icon         https://images.neopets.com/themes/h5/basic/images/battledome-icon.png
 // @run-at       document-end
+// @connect      items.jellyneo.net
+// @connect      itemdb.com.br
+// @grant        GM_xmlhttpRequest
 // @grant        GM.setValue
 // @grant        GM.getValue
 // ==/UserScript==
 
+// ATTENTION!
+// If recently updated, it is recommended to run updatePrices before battling.
+
 // Summary:
 // This userscript adds an item gotten with Void Quantum Blaster to a list, or increases the quantity by 1 if you already got it.
+// The price is also collected from itemdb or JellyNeo, and updated each time the same item is added. There is an update button to force an update for your log
+// DO NOT leave the page before the update is finished, as problems may occur.
 // The list is hidden and can only be viewed by downloading the csv. Two icons, Clear and Download, are added to the bookmark bar in the dome.
+
+// Configuration:
+// Set this isUseJellyNeo to true to use JellyNeo's price on the search results page.
+// Set this isUseJellyNeo to false to use the values from itemdb's item page.
+// If isUseJellyNeo is false, set itemdbMedianCount to a positive integer that determines how many past prices
+// you get a median of. Set it to 1 to just get the most recent price.
+const isUseJellyNeo = false; //default is false
+const itemdbMedianCount = 1; //default is 20
 
 (function() {
     'use strict';
@@ -29,33 +46,197 @@
         GM.setValue(STORAGE, "[]");
     }
 
-    const exportItemLogsToCsv = async () => {
-        const itemData = await getItems();
-        const filename = "neopets-void-quantum-blaster-log.csv";
-        const headers = ["Item", "Quantity"];
-        const csvData = [headers.join(',')];
-        csvData.push("Total = " + itemData.reduce((sum, current) => sum + current.quantity, 0));
-        csvData.push("");
-        itemData.forEach(item => csvData.push([
-            item.item,
-            item.quantity
-        ].join(',')));
+    function fetchItemPrice(itemName) {
+        const itemSlug = itemName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z-]/g, '');
+        const itemSlugJellyNeo = encodeURIComponent(itemName.toLowerCase()).replace(/\s+/g, '+');
+        const itemPageUrl = `https://itemdb.com.br/item/${itemSlug}`;
+        const itemPageJellyNeoUrl = `https://items.jellyneo.net/search/?name=${itemSlugJellyNeo}&name_type=3`;
+        console.log(itemPageJellyNeoUrl);
 
-        const blob = new Blob([csvData.join("\n")], { type: 'text/csv;charset=utf-8;' });
-        if (navigator.msSaveBlob) { // IE 10+
-            navigator.msSaveBlob(blob, filename);
-        } else {
-            const link = document.createElement("a");
-            if (link.download !== undefined) {
-                const url = URL.createObjectURL(blob);
-                link.setAttribute("href", url);
-                link.setAttribute("download", filename);
-                link.style.visibility = 'hidden';
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: isUseJellyNeo ? itemPageJellyNeoUrl : itemPageUrl,
+                onload: function (res) {
+                    if (res.status !== 200) {
+                        return resolve('Error Fetching Price');
+                    }
+
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(res.responseText, 'text/html');
+                    if (isUseJellyNeo) {
+                        const priceLink = doc.querySelector('.jnflex-grid .price-history-link');
+
+                        if (!priceLink || !priceLink.textContent) {
+                            return resolve('No Price Data');
+                        }
+
+                        const rawText = priceLink.textContent.trim();
+
+                        const numericString = rawText.replace(/,/g, '').replace(/[^\d]/g, '');
+                        const price = parseInt(numericString, 10);
+
+                        if (!isNaN(price)) {
+                            return resolve(price);
+                        }
+
+                        if (rawText.toLowerCase().includes('unknown') || rawText.toLowerCase().includes('inflation')) {
+                            return resolve(rawText);
+                        }
+
+                        resolve('No Price Data');
+                    } else {
+                        const rows = Array.from(doc.querySelectorAll('table tbody tr'));
+                        const priceCells = [];
+                        let hasWarning = false;
+
+                        for (const row of rows) {
+                            const firstTd = row.querySelector('td:first-child');
+                            if (!firstTd || !firstTd.textContent) continue;
+
+                            const text = firstTd.textContent.trim().replace(/,/g, '').replace(/[^\d]/g, '');
+                            const price = parseInt(text, 10);
+                            if (!isNaN(price)) {
+                                priceCells.push(price);
+                            }
+
+                            const rowText = row.textContent.toLowerCase();
+                            const containsKeyword = /(added|unavailable|quest|daily|pool)/.test(rowText);
+                            const containsLink = row.querySelector('a') !== null;
+
+                            if (containsKeyword || containsLink) {
+                                hasWarning = true;
+                            }
+
+                            if (priceCells.length >= itemdbMedianCount) break;
+                        }
+
+                        if (priceCells.length === 0) {
+                            return resolve('No Price Data');
+                        }
+                        priceCells.sort((a, b) => a - b);
+                        const mid = Math.floor(priceCells.length / 2);
+                        const median = priceCells.length % 2 === 0
+                        ? Math.round((priceCells[mid - 1] + priceCells[mid]) / 2)
+                        : priceCells[mid];
+
+                        resolve(median);
+                    }
+                },
+                onerror: function () {
+                    resolve('Error Fetching Price');
+                }
+            });
+        });
+    }
+
+    async function fetchAllItemPrices(itemArray, onProgress) {
+        const results = [];
+
+        for (let i = 0; i < itemArray.length; i++) {
+            const itemData = itemArray[i];
+            console.log(`[${i + 1}/${itemArray.length}] Fetching price for: ${itemData.item}`);
+
+            try {
+                const newPrice = await fetchItemPrice(itemData.item);
+                results.push({ item: itemData.item, quantity: itemData.quantity, price: newPrice});
+
+                if (typeof onProgress === 'function') {
+                    onProgress({
+                        current: i + 1,
+                        total: itemArray.length,
+                        itemName: itemData.item,
+                        price: newPrice
+                    });
+                }
+            } catch (error) {
+                console.error(`Failed to fetch ${itemData.item}:`, error);
+                results.push({ item: itemData.item, quantity: itemData.quantity, price: 'Error'});
+            }
+
+            if (i < itemArray.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 200));
             }
         }
+
+        return results;
+    }
+
+    const updatePrices = async () => {
+        try {
+            const items = await getItems();
+            console.log(items);
+
+            const updatedItemList = await fetchAllItemPrices(items, (result) => {
+                console.log(result.current + '/' + result.total + ': ' + result.itemName + ' - ' + result.price);
+            });
+
+            await updatedItemList.sort((a, b) => {
+                const priceA = parseInt(String(a.price).replace(/[^\d]/g, ''), 10) || 0;
+                const priceB = parseInt(String(b.price).replace(/[^\d]/g, ''), 10) || 0;
+
+                return priceB - priceA;
+            });
+
+            GM.setValue(STORAGE, JSON.stringify(updatedItemList));
+
+            return true;
+        } catch (error) {
+            console.error("Error updating prices:", error);
+            throw error;
+        }
+    };
+
+    const exportItemLogsToCsv = async () => {
+        getItems().then(async (items) => {
+            const filename = "neopets-void-quantum-blaster-log.csv";
+            const headers = ["Item", "Quantity", "Price"];
+            const csvData = [headers.join(',')];
+
+            const totalQuantity = items.reduce((sum, current) => sum + current.quantity, 0);
+            const totalInventoryValueRaw = items.reduce((sum, current) => {
+                const cleanPrice = parseInt(String(current.price).replace(/[^\d]/g, ''), 10) || 0;
+                return sum + (cleanPrice * current.quantity);
+            }, 0);
+            const totalInventoryValueFormatted = totalInventoryValueRaw.toLocaleString();
+
+            csvData.push(["Total", totalQuantity, `"${totalInventoryValueFormatted}"`]);
+            csvData.push("");
+
+            items.forEach(item => {
+                let formattedPrice = item.price;
+
+                const numericMatch = String(item.price).match(/\d+/);
+                if (numericMatch) {
+                    const rawNumber = parseInt(numericMatch[0], 10);
+                    const commasNumber = rawNumber.toLocaleString();
+
+                    formattedPrice = String(item.price).replace(/\d+/, commasNumber);
+                }
+
+                csvData.push([
+                    `"${item.item}"`,
+                    item.quantity,
+                    `"${formattedPrice}"`
+                ].join(','))
+            });
+
+            const blob = new Blob([csvData.join("\n")], { type: 'text/csv;charset=utf-8;' });
+            if (navigator.msSaveBlob) { // IE 10+
+                navigator.msSaveBlob(blob, filename);
+            } else {
+                const link = document.createElement("a");
+                if (link.download !== undefined) {
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", filename);
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+            }
+        });
     };
 
     const titleContainer = document.querySelector('.navsub-left__2020');
@@ -77,6 +258,27 @@
             }
         };
 
+        const updateTag = document.createElement('a');
+        updateTag.innerHTML = '<img src="https://images.neopets.com/prehistoric/obelisk/refreshquest_bh3y98ur/btn_refreshquest.png" alt="Update" style="vertical-align: middle; width: 30px; height: 30px; object-fit: cover; object-position: top;">';
+        updateTag.title = 'Update prices in log';
+        updateTag.style.marginRight = '10px';
+        updateTag.style.cursor = 'pointer';
+        updateTag.style.display = 'inline-flex';
+        updateTag.style.position = 'relative';
+        updateTag.style.top = '5px';
+        updateTag.onclick = function() {
+            if (window.confirm('This could take some time. Are you sure you wish to update your log?')) {
+            alert('Please wait for the final alert before leaving the page.');
+                updatePrices()
+                    .then(() => {
+                    alert('Prices successfully updated. You can now leave the page.');
+                })
+                    .catch((error) => {
+                    console.error("Promise rejected:", error);
+                });
+            }
+        };
+
         const downloadTag = document.createElement('a');
         downloadTag.innerHTML = '<img src="https://images.neopets.com/neohome2/public_html/disk.png" alt="Download" style="vertical-align: middle; width: 30px; height: 30px;">';
         downloadTag.title = 'Download item log';
@@ -93,6 +295,7 @@
         };
 
         titleContainer.appendChild(clearTag);
+        titleContainer.appendChild(updateTag);
         titleContainer.appendChild(downloadTag);
     }
 
@@ -120,20 +323,27 @@
             });
 
             if (!!customItemsArray.length) {
-                getItems().then((items) => {
-                    customItemsArray.forEach(item => {
+                getItems().then(async (items) => {
+                    console.log(items);
+                    for (const item of customItemsArray) {
                         let existingItem = items.find(entry => entry.item === item);
 
                         if (existingItem) {
+                            // Update quantity and price for existing items.
                             existingItem.quantity += 1;
+                            existingItem.price = await fetchItemPrice(item);
                         } else {
-                            items.push({ item: item, quantity: 1 });
+                            const newPrice = await fetchItemPrice(item);
+                            items.push({ item: item, quantity: 1, price: newPrice});
                         }
+                    }
+                    items.sort((a, b) => {
+                        const priceA = parseInt(String(a.price).replace(/[^\d]/g, ''), 10) || 0;
+                        const priceB = parseInt(String(b.price).replace(/[^\d]/g, ''), 10) || 0;
+
+                        return priceB - priceA;
                     });
-                    GM.setValue(STORAGE, JSON.stringify(items));
-                })
-                .catch((error) => {
-                    console.error("Promise rejected:", error);
+                    await GM.setValue(STORAGE, JSON.stringify(items));
                 });
             }
         }
