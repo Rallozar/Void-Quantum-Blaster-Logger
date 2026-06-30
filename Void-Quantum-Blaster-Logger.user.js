@@ -112,6 +112,9 @@ const itemdbMedianCount = 20; //default is 20
         for (let i = 0; i < itemArray.length; i++) {
             const itemData = itemArray[i];
             console.log(`[${i + 1}/${itemArray.length}] Fetching price for: ${itemData.item}`);
+            if (!itemData.lastUpdated) {
+                itemData.lastUpdated = now + CACHE_DURATION;
+            }
             if (now - itemData.lastUpdated < CACHE_DURATION) {
                 console.log("Price was updated less than 24 hours ago. Skipping update.");
                 results.push(itemData);
