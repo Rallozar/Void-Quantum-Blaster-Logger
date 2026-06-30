@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Void Quantum Blaster Logger
 // @namespace    http://tampermonkey.net/
-// @version      2026.06.29
+// @version      2026.06.30
 // @updateURL    https://raw.githubusercontent.com/Rallozar/Void-Quantum-Blaster-Logger/main/Void-Quantum-Blaster-Logger.user.js
 // @description  A userscript that keeps track of item gotten with Void Quantum Blaster. Works with two blasters at once.
 // @author       rallozarx
@@ -323,8 +323,10 @@ const itemdbMedianCount = 20; //default is 20
                         if (existingItem) {
                             // Update quantity and price for existing items.
                             existingItem.quantity += 1;
-                            existingItem.price = await fetchItemPrice(item);
-                            existingItem.lastUpdated = now;
+                            if (now - itemData.lastUpdated >= CACHE_DURATION) {
+                                existingItem.price = await fetchItemPrice(item);
+                                existingItem.lastUpdated = now;
+                            }
                         } else {
                             const newPrice = await fetchItemPrice(item);
                             items.push({ item: item, quantity: 1, price: newPrice, lastUpdated: now});
