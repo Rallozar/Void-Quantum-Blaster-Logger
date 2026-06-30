@@ -314,37 +314,37 @@ const itemdbMedianCount = 20; //default is 20
                 }
             });
 
-            if (!!customItemsArray.length) {
-                getItems().then(async (items) => {
-                    let tracked = await GM.getValue(TRACKED, 0);
-                    const now = Date.now();
-                    tracked+= tempTracked;
-                    console.log(items);
-                    for (const item of customItemsArray) {
-                        let existingItem = items.find(entry => entry.item === item);
 
-                        if (existingItem) {
-                            // Update quantity and price for existing items.
-                            existingItem.quantity += 1;
-                            if (now - existingItem.lastUpdated >= CACHE_DURATION) {
-                                existingItem.price = await fetchItemPrice(item);
-                                existingItem.lastUpdated = now;
-                            }
-                        } else {
-                            const newPrice = await fetchItemPrice(item);
-                            items.push({ item: item, quantity: 1, price: newPrice, lastUpdated: now});
+            getItems().then(async (items) => {
+                let tracked = await GM.getValue(TRACKED, 0);
+                const now = Date.now();
+                tracked+= tempTracked;
+                console.log(items);
+                for (const item of customItemsArray) {
+                    let existingItem = items.find(entry => entry.item === item);
+
+                    if (existingItem) {
+                        // Update quantity and price for existing items.
+                        existingItem.quantity += 1;
+                        if (now - existingItem.lastUpdated >= CACHE_DURATION) {
+                            existingItem.price = await fetchItemPrice(item);
+                            existingItem.lastUpdated = now;
                         }
+                    } else {
+                        const newPrice = await fetchItemPrice(item);
+                        items.push({ item: item, quantity: 1, price: newPrice, lastUpdated: now});
                     }
-                    items.sort((a, b) => {
-                        const priceA = parseInt(String(a.price).replace(/[^\d]/g, ''), 10) || 0;
-                        const priceB = parseInt(String(b.price).replace(/[^\d]/g, ''), 10) || 0;
+                }
+                items.sort((a, b) => {
+                    const priceA = parseInt(String(a.price).replace(/[^\d]/g, ''), 10) || 0;
+                    const priceB = parseInt(String(b.price).replace(/[^\d]/g, ''), 10) || 0;
 
-                        return priceB - priceA;
-                    });
-                    await GM.setValue(STORAGE, JSON.stringify(items));
-                    await GM.setValue(TRACKED, tracked);
+                    return priceB - priceA;
                 });
-            }
+                await GM.setValue(STORAGE, JSON.stringify(items));
+                await GM.setValue(TRACKED, tracked);
+            });
+
         }
     });
 
