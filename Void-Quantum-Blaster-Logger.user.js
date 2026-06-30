@@ -326,7 +326,7 @@ const itemdbMedianCount = 20; //default is 20
                         if (existingItem) {
                             // Update quantity and price for existing items.
                             existingItem.quantity += 1;
-                            if (now - itemData.lastUpdated >= CACHE_DURATION) {
+                            if (now - existingItem.lastUpdated >= CACHE_DURATION) {
                                 existingItem.price = await fetchItemPrice(item);
                                 existingItem.lastUpdated = now;
                             }
