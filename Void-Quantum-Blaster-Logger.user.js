@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Void Quantum Blaster Logger
 // @namespace    http://tampermonkey.net/
-// @version      2026.06.27
+// @version      2026.06.29
 // @updateURL    https://raw.githubusercontent.com/Rallozar/Void-Quantum-Blaster-Logger/main/Void-Quantum-Blaster-Logger.user.js
 // @description  A userscript that keeps track of item gotten with Void Quantum Blaster. Works with two blasters at once.
 // @author       rallozarx
@@ -19,6 +19,7 @@
 
 // Summary:
 // This userscript adds an item gotten with Void Quantum Blaster to a list, or increases the quantity by 1 if you already got it.
+// The amount of uses of Void Quantum Blaster is also kept track, and displayed when viewing the download.
 // The price is also collected from itemdb and updated each time the same item is added. There is an update button to force an update for your log
 // DO NOT leave the page before the update is finished, as problems may occur.
 // The list is hidden and can only be viewed by downloading the csv. Three icons, Clear, Update, and Download, are added to the bookmark bar in the dome.
@@ -31,7 +32,9 @@ const itemdbMedianCount = 20; //default is 20
 (function() {
     'use strict';
 
+    const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
     const STORAGE = "voidquantumblaster";
+    const TRACKED = "blastercount";
 
     const getItems = async () => {
         const storage = await GM.getValue(STORAGE, "[]");
@@ -39,6 +42,7 @@ const itemdbMedianCount = 20; //default is 20
     }
 
     const clearAllItems = () => {
+        GM.setValue(TRACKED, 0);
         GM.setValue(STORAGE, "[]");
     }
 
@@ -103,14 +107,20 @@ const itemdbMedianCount = 20; //default is 20
 
     async function fetchAllItemPrices(itemArray, onProgress) {
         const results = [];
+        const now = Date.now();
 
         for (let i = 0; i < itemArray.length; i++) {
             const itemData = itemArray[i];
             console.log(`[${i + 1}/${itemArray.length}] Fetching price for: ${itemData.item}`);
+            if (now - itemData.lastUpdated < CACHE_DURATION) {
+                console.log("Price was updated less than 24 hours ago. Skipping update.");
+                results.push(itemData);
+                continue;
+            }
 
             try {
                 const newPrice = await fetchItemPrice(itemData.item);
-                results.push({ item: itemData.item, quantity: itemData.quantity, price: newPrice});
+                results.push({ item: itemData.item, quantity: itemData.quantity, price: newPrice, lastUpdated: now});
 
                 if (typeof onProgress === 'function') {
                     onProgress({
@@ -122,11 +132,11 @@ const itemdbMedianCount = 20; //default is 20
                 }
             } catch (error) {
                 console.error(`Failed to fetch ${itemData.item}:`, error);
-                results.push({ item: itemData.item, quantity: itemData.quantity, price: 'Error'});
+                results.push({ item: itemData.item, quantity: itemData.quantity, price: 'Error', lastUpdated: now});
             }
 
             if (i < itemArray.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 200));
+                await new Promise(resolve => setTimeout(resolve, 1000));
             }
         }
 
@@ -164,6 +174,7 @@ const itemdbMedianCount = 20; //default is 20
             const headers = ["Item", "Quantity", "Price"];
             const csvData = [headers.join(',')];
 
+            const trackedBattles = await GM.getValue(TRACKED, 0);
             const totalQuantity = items.reduce((sum, current) => sum + current.quantity, 0);
             const totalInventoryValueRaw = items.reduce((sum, current) => {
                 const cleanPrice = parseInt(String(current.price).replace(/[^\d]/g, ''), 10) || 0;
@@ -172,6 +183,7 @@ const itemdbMedianCount = 20; //default is 20
             const totalInventoryValueFormatted = totalInventoryValueRaw.toLocaleString();
 
             csvData.push(["Total", totalQuantity, `"${totalInventoryValueFormatted}"`]);
+            csvData.push(["Total blaster uses", parseInt(String(trackedBattles).replace(/[^\d]/g, ''), 10) || 0 , ""])
             csvData.push("");
 
             items.forEach(item => {
@@ -239,7 +251,7 @@ const itemdbMedianCount = 20; //default is 20
         updateTag.style.top = '5px';
         updateTag.onclick = function() {
             if (window.confirm('This could take some time. Are you sure you wish to update your log?')) {
-            alert('Please wait for the final alert before leaving the page.');
+            alert('Please wait for the success message before leaving the page.');
                 updatePrices()
                     .then(() => {
                     alert('Prices successfully updated. You can now leave the page.');
@@ -283,7 +295,9 @@ const itemdbMedianCount = 20; //default is 20
 
             const messageCells = document.querySelectorAll('#log td.msg');
             const customItemsArray = [];
+            const blasterPattern = /You release a powerful blast of darkness from the Void Quantum Blaster at\s+(.+)/i;
             const rewardPattern = /You have also been rewarded with\s+(.+)/i;
+            let tempTracked = 0;
 
             messageCells.forEach(cell => {
                 const text = cell.textContent.trim();
@@ -291,10 +305,17 @@ const itemdbMedianCount = 20; //default is 20
                 if (match) {
                     customItemsArray.push(match[1].trim());
                 }
+                const blasterMatch = text.match(blasterPattern);
+                if (blasterMatch) {
+                    tempTracked++;
+                }
             });
 
             if (!!customItemsArray.length) {
                 getItems().then(async (items) => {
+                    let tracked = await GM.getValue(TRACKED, 0);
+                    const now = Date.now();
+                    tracked+= tempTracked;
                     console.log(items);
                     for (const item of customItemsArray) {
                         let existingItem = items.find(entry => entry.item === item);
@@ -303,9 +324,10 @@ const itemdbMedianCount = 20; //default is 20
                             // Update quantity and price for existing items.
                             existingItem.quantity += 1;
                             existingItem.price = await fetchItemPrice(item);
+                            existingItem.lastUpdated = now;
                         } else {
                             const newPrice = await fetchItemPrice(item);
-                            items.push({ item: item, quantity: 1, price: newPrice});
+                            items.push({ item: item, quantity: 1, price: newPrice, lastUpdated: now});
                         }
                     }
                     items.sort((a, b) => {
@@ -315,6 +337,7 @@ const itemdbMedianCount = 20; //default is 20
                         return priceB - priceA;
                     });
                     await GM.setValue(STORAGE, JSON.stringify(items));
+                    await GM.setValue(TRACKED, tracked);
                 });
             }
         }
