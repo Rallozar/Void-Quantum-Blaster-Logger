@@ -2,7 +2,6 @@
 // @name         Void Quantum Blaster Logger
 // @namespace    http://tampermonkey.net/
 // @version      2026.06.30
-// @updateURL    https://raw.githubusercontent.com/Rallozar/Void-Quantum-Blaster-Logger/main/Void-Quantum-Blaster-Logger.user.js
 // @description  A userscript that keeps track of item gotten with Void Quantum Blaster. Works with two blasters at once.
 // @author       rallozarx
 // @match        https://www.neopets.com/dome/*
